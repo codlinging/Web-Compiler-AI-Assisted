@@ -37,7 +37,4 @@ Right now, if a user types something wrong, your parser returns a simple `Error 
 
 ---
 
-**Which direction would you like to build first?** I can help you write the Rust logic for the Bison parser, set up the Axum AI route, or start building the C-code generator.
-
-A Quick Tip for the Future
-Right now, the frontend sends a request every single time you type a keystroke. As your compiler gets more advanced, this might overwhelm the backend. In the future, you will want to look up a frontend concept called "Debouncing"—this makes the frontend wait until the user stops typing for ~300 milliseconds before sending the network request!
+*
