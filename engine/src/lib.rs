@@ -18,6 +18,7 @@ pub struct Token{
     pub token_type:TokenType,
     pub value:String,
     pub line:usize,
+    pub column:usize,
 }
 #[derive(Serialize,Deserialize,Clone,Debug)]
 #[serde(tag="type")]
@@ -28,20 +29,22 @@ pub enum ASTNode{
     BisonTokenDecl{names:Vec<String>},
     BisonGrammarRule{name:String, alternatives:Vec<ASTNode>},
     BisonAlternative{symbols:Vec<String>, action:Option<String>},
-    Error {message:String},
+    Error { message: String, line: usize, column: usize },
 }
 pub fn lexer(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = input.chars().peekable();
     let mut line = 1;
+    let mut column=1;
 
     while let Some(&c) = chars.peek() {
+        let start_col=column;
         match c {
-            '\n' => { line += 1; chars.next(); }
+            '\n' => { line += 1;column=1; chars.next(); }
             ' ' | '\t' | '\r' => { chars.next(); }
-            ':' => { tokens.push(Token { token_type: TokenType::Colon, value: ":".to_string(), line }); chars.next(); }
-            '|' => { tokens.push(Token { token_type: TokenType::Pipe, value: "|".to_string(), line }); chars.next(); }
-            ';' => { tokens.push(Token { token_type: TokenType::Semicolon, value: ";".to_string(), line }); chars.next(); }
+            ':' => { tokens.push(Token { token_type: TokenType::Colon, value: ":".to_string(), line,column:start_col });column+=1; chars.next(); }
+            '|' => { tokens.push(Token { token_type: TokenType::Pipe, value: "|".to_string(), line ,column: start_col});column+=1; chars.next(); }
+            ';' => { tokens.push(Token { token_type: TokenType::Semicolon, value: ";".to_string(), line,column: start_col }); column+=1; chars.next(); }
             '\'' | '"' => {
                 let quote = c;
                 let mut val = String::new();
@@ -52,13 +55,13 @@ pub fn lexer(input: &str) -> Vec<Token> {
                     chars.next();
                     if nc == quote { break; }
                 }
-                tokens.push(Token { token_type: TokenType::Literal, value: val, line });
+                tokens.push(Token { token_type: TokenType::Literal, value: val, line ,column: start_col});
             }
             '%' => {
                 chars.next();
                 if let Some(&'%') = chars.peek() {
                     chars.next();
-                    tokens.push(Token { token_type: TokenType::SectionSeparator, value: "%%".to_string(), line });
+                    tokens.push(Token { token_type: TokenType::SectionSeparator, value: "%%".to_string(), line ,column: start_col});
                 } else {
                     let mut kw = String::from("%");
                     while let Some(&nc) = chars.peek() {
@@ -66,7 +69,7 @@ pub fn lexer(input: &str) -> Vec<Token> {
                         kw.push(nc);
                         chars.next();
                     }
-                    tokens.push(Token { token_type: TokenType::BisonKeyword, value: kw, line });
+                    tokens.push(Token { token_type: TokenType::BisonKeyword, value: kw, line ,column: start_col});
                 }
             }
             '{' => {
@@ -78,7 +81,7 @@ pub fn lexer(input: &str) -> Vec<Token> {
                     chars.next();
                 }
                 chars.next();
-                tokens.push(Token { token_type: TokenType::ActionBlock, value: code.trim().to_string(), line });
+                tokens.push(Token { token_type: TokenType::ActionBlock, value: code.trim().to_string(), line,column: start_col });
             }
             c if c.is_alphabetic() || c == '_' => {
                 let mut ident = String::new();
@@ -87,7 +90,7 @@ pub fn lexer(input: &str) -> Vec<Token> {
                     ident.push(nc);
                     chars.next();
                 }
-                tokens.push(Token { token_type: TokenType::Identifier, value: ident, line });
+                tokens.push(Token { token_type: TokenType::Identifier, value: ident, line,column: start_col });
             }
             _ => {
                 // Fallback for Flex Regexes or unknown chars
@@ -98,7 +101,7 @@ pub fn lexer(input: &str) -> Vec<Token> {
                     chars.next();
                 }
                 if !pattern.is_empty() {
-                    tokens.push(Token { token_type: TokenType::Regex, value: pattern, line });
+                    tokens.push(Token { token_type: TokenType::Regex, value: pattern, line,column: start_col });
                 }
             }
         }
@@ -154,7 +157,7 @@ fn parse_bison_rule(&mut self)->ASTNode{
     let name=self.advance().unwrap().value.clone();
     if let Some(t)=self.advance(){
         if t.token_type!=TokenType::Colon{
-            return ASTNode::Error{message:format!("Expected ':'after rule {}",name)};
+            return ASTNode::Error{message: "Expected Regex Pattern".to_string(), line: t.line, column: t.column};
         }
     }
     let mut alternatives=Vec::new();
@@ -204,12 +207,18 @@ fn parse_flex_rules(&mut self)->ASTNode{
     let pattern_token=self.advance();
     let pattern=match pattern_token{
         Some(t) if t.token_type==TokenType::Regex||t.token_type==TokenType::Identifier=>t.value.clone(),
-        _=>return ASTNode::Error { message: "Expected Action Block {...}".to_string() },
+        _ => {
+    let (l, c) = self.peek().map(|t| (t.line, t.column)).unwrap_or((0, 0));
+    return ASTNode::Error { message: "Expected Regex Pattern".to_string(), line: l, column: c }
+},
     };
     let action_token = self.advance();
         let action = match action_token {
             Some(t) if t.token_type == TokenType::ActionBlock => t.value.clone(),
-            _ => return ASTNode::Error { message: "Expected Action Block {...}".to_string() },
+            _ => {
+    let (l, c) = self.peek().map(|t| (t.line, t.column)).unwrap_or((0, 0));
+    return ASTNode::Error { message: "Expected Regex Pattern".to_string(), line: l, column: c }
+},
         };
     ASTNode::FlexRule { pattern, action }
 
