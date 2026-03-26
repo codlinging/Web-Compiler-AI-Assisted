@@ -20,19 +20,32 @@ struct AssistRequest{
 struct AssistResponse{
     suggestion:String,
 }
+// 1. Update your ResponseData struct to include the generated_code
 #[derive(Serialize)]
-struct ResponseData{
-    tokens:Vec<Token>,
-    ast:ASTNode,
+struct ResponseData {
+    tokens: Vec<Token>,
+    ast: ASTNode,
+    generated_code: Option<String>, // <--- NEW
 }
-async fn handle_analyze(Json(payload):Json<RequestData>)->Json<ResponseData>{
-    let tokens=scan_code(&payload.code);
-    let ast =if payload.language=="bison"{
+
+// 2. Update the handle_analyze function
+async fn handle_analyze(Json(payload): Json<RequestData>) -> Json<ResponseData> {
+    let tokens = scan_code(&payload.code);
+    
+    let ast = if payload.language == "bison" {
         parse_bison(&payload.code)
-}else{
-    parse_flex(&payload.code)
-};
-Json(ResponseData{tokens,ast})
+    } else {
+        parse_flex(&payload.code)
+    };
+
+    // <--- NEW: Generate the C code if there are no syntax errors
+    let generated_code = if matches!(ast, ASTNode::Error { .. }) {
+        None
+    } else {
+        Some(engine::generate_c_code(&ast)) // Make sure 'generate_c_code' is imported at the top!
+    };
+
+    Json(ResponseData { tokens, ast, generated_code })
 }
 async fn handle_assist(Json(payload):Json<AssistRequest>)->Json<AssistResponse>{
     let api_key=std::env::var("GEMINI_API_KEY").unwrap_or_default();

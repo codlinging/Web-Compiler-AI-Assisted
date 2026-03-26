@@ -196,6 +196,10 @@ export default function Home() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [ast, setAst] = useState<ASTNode | null>(null); 
   
+  // NEW: State variables for Code Generation View
+  const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"ast" | "c-code">("ast");
+  
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
 
@@ -204,6 +208,7 @@ export default function Home() {
     setCode(newLang === "flex" ? DEFAULT_FLEX_CODE : DEFAULT_BISON_CODE);
     setTokens([]);
     setAst(null);
+    setGeneratedCode(null);
     setAiResponse(null);
   };
 
@@ -223,6 +228,7 @@ export default function Home() {
         const data = await response.json();
         setTokens(data.tokens);
         setAst(data.ast);
+        setGeneratedCode(data.generated_code); // NEW: Get C code from backend
       } catch (e) {
         console.error("Backend connection failed:", e);
       }
@@ -255,7 +261,6 @@ export default function Home() {
     }
   };
 
-  // Recursively find errors so squiggly lines appear even if the error is nested in Bison rules
   const findErrorNode = (node: ASTNode | undefined): { line: number; column: number; message: string } | null => {
     if (!node) return null;
     if (node.type === "Error") {
@@ -314,17 +319,41 @@ export default function Home() {
       </div>
 
       <div className="w-1/2 flex flex-col gap-4 bg-[#0a0a0a] rounded-lg border border-gray-800 p-4">
+        
+        {/* NEW: Tab Switcher Header */}
         <div className="flex justify-between items-center border-b border-gray-800 pb-2">
-          <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest">
-            Abstract Syntax Tree
-          </h2>
+          <div className="flex gap-4">
+            <button 
+              onClick={() => setViewMode("ast")}
+              className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "ast" ? "text-gray-200 border-blue-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}
+            >
+              Abstract Syntax Tree
+            </button>
+            <button 
+              onClick={() => setViewMode("c-code")}
+              className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "c-code" ? "text-gray-200 border-green-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}
+            >
+              Generated C Code
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto font-mono text-sm">
-          {ast ? (
-            <TreeNode node={ast} onAskAI={handleAskAI} isLoadingAI={isLoadingAI} aiResponse={aiResponse} />
+          {viewMode === "ast" ? (
+             ast ? (
+               <TreeNode node={ast} onAskAI={handleAskAI} isLoadingAI={isLoadingAI} aiResponse={aiResponse} />
+             ) : (
+               <div className="text-gray-600 italic">Type code to generate AST...</div>
+             )
           ) : (
-            <div className="text-gray-600 italic">Type code to generate AST...</div>
+             /* NEW: The C-Code View Content */
+             generatedCode ? (
+               <pre className="text-green-400 p-4 bg-black/50 border border-green-900/30 rounded-lg whitespace-pre-wrap">
+                 {generatedCode}
+               </pre>
+             ) : (
+               <div className="text-gray-600 italic">Waiting for valid syntax to generate C code...</div>
+             )
           )}
         </div>
       </div>
