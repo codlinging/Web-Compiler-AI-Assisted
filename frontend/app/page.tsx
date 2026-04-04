@@ -23,6 +23,8 @@ interface ASTNode {
   message?: string;
   line?: number;
   column?: number;
+  prologue?: string; // <-- ADD THIS
+  epilogue?: string; // <-- ADD THIS
 }
 
 const DEFAULT_FLEX_CODE = "%%\n[0-9]+    { return NUMBER; }\n[a-z]+    { return WORD; }\n%%";
@@ -46,13 +48,36 @@ const TreeNode = ({
   }
 
   // --- FLEX NODES ---
+// --- FLEX NODES ---
   if (node.type === "FlexFile") {
     return (
       <div className="ml-4 border-l border-gray-700 pl-4 mt-2">
         <span className="text-yellow-500 font-bold text-xs uppercase">Flex File Root</span>
+        
+        {/* Render the Prologue */}
+        {node.prologue && (
+          <div className="mt-2 mb-2">
+            <span className="text-gray-500 text-[10px] uppercase tracking-widest">Prologue</span>
+            <pre className="bg-gray-900/50 border border-gray-800 p-2 rounded text-blue-300 text-xs mt-1 whitespace-pre-wrap">
+              {node.prologue}
+            </pre>
+          </div>
+        )}
+
+        {/* Render the Rules */}
         {node.rules?.map((child, i) => (
           <TreeNode key={i} node={child} onAskAI={onAskAI} isLoadingAI={isLoadingAI} aiResponse={aiResponse} />
         ))}
+
+        {/* Render the Epilogue */}
+        {node.epilogue && (
+          <div className="mt-4">
+            <span className="text-gray-500 text-[10px] uppercase tracking-widest">Epilogue</span>
+            <pre className="bg-gray-900/50 border border-gray-800 p-2 rounded text-blue-300 text-xs mt-1 whitespace-pre-wrap">
+              {node.epilogue}
+            </pre>
+          </div>
+        )}
       </div>
     );
   }
@@ -196,12 +221,17 @@ export default function Home() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [ast, setAst] = useState<ASTNode | null>(null); 
   
-  // NEW: State variables for Code Generation View
+  // Phase 5 & 6 State Variables
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"ast" | "c-code">("ast");
+  const [viewMode, setViewMode] = useState<"ast" | "c-code" | "console">("ast");
   
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
+
+  // Phase 6 Execution Variables
+  const [testInput, setTestInput] = useState<string>("123 + 456");
+  const [consoleOutput, setConsoleOutput] = useState<string>("");
+  const [isCompiling, setIsCompiling] = useState<boolean>(false);
 
   const handleLanguageSwitch = (newLang: "flex" | "bison") => {
     setLanguage(newLang);
@@ -210,6 +240,7 @@ export default function Home() {
     setAst(null);
     setGeneratedCode(null);
     setAiResponse(null);
+    setConsoleOutput("");
   };
 
   const handleEditorChange = async (value: string | undefined) => {
@@ -228,7 +259,7 @@ export default function Home() {
         const data = await response.json();
         setTokens(data.tokens);
         setAst(data.ast);
-        setGeneratedCode(data.generated_code); // NEW: Get C code from backend
+        setGeneratedCode(data.generated_code);
       } catch (e) {
         console.error("Backend connection failed:", e);
       }
@@ -261,12 +292,40 @@ export default function Home() {
     }
   };
 
+  const handleRunCompiler = async () => {
+    if (!generatedCode) {
+      setConsoleOutput("❌ Error: No valid C code to compile. Fix syntax errors first.");
+      return;
+    }
+    
+    setIsCompiling(true);
+    setConsoleOutput("⚙️ Compiling with GCC...");
+
+    try {
+      const response = await fetch("http://127.0.0.1:4000/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ c_code: generatedCode, test_input: testInput }),
+      });
+
+      const data = await response.json();
+      if (data.error) {
+        setConsoleOutput(`❌ [COMPILATION ERROR]\n${data.error}`);
+      } else {
+        setConsoleOutput(`✅ [COMPILATION SUCCESS]\n\n🖥️ [PROGRAM OUTPUT]\n${data.output}`);
+      }
+    } catch (e) {
+      setConsoleOutput("⚠️ Failed to reach execution server.");
+    } finally {
+      setIsCompiling(false);
+    }
+  };
+
   const findErrorNode = (node: ASTNode | undefined): { line: number; column: number; message: string } | null => {
     if (!node) return null;
     if (node.type === "Error") {
       return { line: node.line || 1, column: node.column || 1, message: node.message || "Error" };
     }
-    
     if (node.rules) {
       for (const rule of node.rules) {
         const err = findErrorNode(rule);
@@ -320,40 +379,45 @@ export default function Home() {
 
       <div className="w-1/2 flex flex-col gap-4 bg-[#0a0a0a] rounded-lg border border-gray-800 p-4">
         
-        {/* NEW: Tab Switcher Header */}
+        {/* Tab Switcher Header */}
         <div className="flex justify-between items-center border-b border-gray-800 pb-2">
           <div className="flex gap-4">
-            <button 
-              onClick={() => setViewMode("ast")}
-              className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "ast" ? "text-gray-200 border-blue-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}
-            >
-              Abstract Syntax Tree
-            </button>
-            <button 
-              onClick={() => setViewMode("c-code")}
-              className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "c-code" ? "text-gray-200 border-green-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}
-            >
-              Generated C Code
-            </button>
+            <button onClick={() => setViewMode("ast")} className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "ast" ? "text-gray-200 border-blue-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}>AST</button>
+            <button onClick={() => setViewMode("c-code")} className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "c-code" ? "text-gray-200 border-green-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}>C Code</button>
+            <button onClick={() => setViewMode("console")} className={`text-sm font-bold uppercase tracking-widest pb-1 border-b-2 transition-all ${viewMode === "console" ? "text-gray-200 border-yellow-500" : "text-gray-600 border-transparent hover:text-gray-400"}`}>Run Console</button>
           </div>
         </div>
 
         <div className="flex-1 overflow-auto font-mono text-sm">
-          {viewMode === "ast" ? (
-             ast ? (
-               <TreeNode node={ast} onAskAI={handleAskAI} isLoadingAI={isLoadingAI} aiResponse={aiResponse} />
-             ) : (
-               <div className="text-gray-600 italic">Type code to generate AST...</div>
-             )
-          ) : (
-             /* NEW: The C-Code View Content */
-             generatedCode ? (
-               <pre className="text-green-400 p-4 bg-black/50 border border-green-900/30 rounded-lg whitespace-pre-wrap">
-                 {generatedCode}
-               </pre>
-             ) : (
-               <div className="text-gray-600 italic">Waiting for valid syntax to generate C code...</div>
-             )
+          {viewMode === "ast" && (ast ? <TreeNode node={ast} onAskAI={handleAskAI} isLoadingAI={isLoadingAI} aiResponse={aiResponse} /> : <div className="text-gray-600 italic">Type code to generate AST...</div>)}
+          
+          {viewMode === "c-code" && (generatedCode ? <pre className="text-green-400 p-4 bg-black/50 border border-green-900/30 rounded-lg whitespace-pre-wrap">{generatedCode}</pre> : <div className="text-gray-600 italic">Waiting for valid syntax to generate C code...</div>)}
+          
+          {/* Execution Console View */}
+          {viewMode === "console" && (
+            <div className="flex flex-col gap-4 h-full p-2">
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-gray-500 font-bold uppercase tracking-widest">Test Input Stream (stdin)</label>
+                <textarea 
+                  value={testInput} 
+                  onChange={(e) => setTestInput(e.target.value)}
+                  className="bg-black border border-gray-700 rounded p-2 text-sm text-white font-mono focus:border-yellow-500 focus:outline-none"
+                  rows={2}
+                />
+                <button 
+                  onClick={handleRunCompiler} disabled={isCompiling}
+                  className="bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-500 hover:to-orange-500 text-white font-bold py-2 rounded text-sm transition-all disabled:opacity-50"
+                >
+                  {isCompiling ? "⚙️ Compiling..." : "▶️ Compile & Run Grammar"}
+                </button>
+              </div>
+              <div className="flex-1 bg-black border border-gray-700 rounded p-3 overflow-auto flex flex-col">
+                <div className="text-xs text-gray-500 font-bold uppercase mb-2 tracking-widest">Terminal Output (stdout)</div>
+                <pre className="text-gray-300 font-mono text-sm whitespace-pre-wrap flex-1">
+                  {consoleOutput || "Ready for execution..."}
+                </pre>
+              </div>
+            </div>
           )}
         </div>
       </div>
